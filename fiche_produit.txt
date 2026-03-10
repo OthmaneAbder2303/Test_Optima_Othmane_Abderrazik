@@ -1,0 +1,27 @@
+=== FICHE PRODUIT : ROBOT DE SOUDAGE RS-440 ===
+Fabricant : AutoWeld Technologies SAS
+Signataire : Mme Isabelle RENARD, Responsable Qualite
+Marches vises : France, Italie, Portugal
+
+--- DOCUMENTATION ---
+Dossier technique : COMPLET
+Schemas electriques et pneumatiques : PRESENTS
+Note : machine tout-electrique, pas de circuits hydrauliques
+Declaration CE : EN COURS, signature prevue avant livraison
+
+--- SECURITE ---
+Enceinte de protection avec acces verrouille : OUI
+Bouton STOP d'urgence en facade : OUI, certifie EN ISO 13850
+Evaluation des risques : REALISEE pour la phase d'utilisation uniquement
+Categorie de risque : standard (pas de categorie speciale)
+
+--- MARQUAGE ET CONFORMITE ---
+Marquage CE : OUI, appose sur le tableau de commande
+
+--- DOCUMENTATION UTILISATEUR ---
+Notice d'instructions : PRESENTE en francais
+Contenu notice - mise en service : OUI
+Contenu notice - maintenance : OUI
+Contenu notice - risques residuels : OUI, section 8.3 (Entretien et
+nettoyage)
+=== FIN ===

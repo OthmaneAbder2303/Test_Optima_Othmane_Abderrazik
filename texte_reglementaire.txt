@@ -1,0 +1,22 @@
+=== EXTRAIT REGLEMENTAIRE SIMPLIFIE (fictif) ===
+
+REQ-01 : Le fabricant doit rediger une declaration CE avant mise sur le
+marche.
+REQ-02 : La declaration CE doit etre signee par un representant habilite.
+REQ-03 : La machine doit porter le marquage CE avant commercialisation.
+REQ-04 : Le dossier technique doit inclure les schemas des circuits de
+commande.
+REQ-05 : Une notice d'instructions doit accompagner la machine.
+REQ-06 : La notice doit etre disponible dans la langue de chaque pays de
+commercialisation.
+REQ-07 : La notice doit mentionner explicitement les risques residuels
+identifies.
+REQ-08 : Une evaluation des risques couvrant le cycle de vie complet doit
+etre documentee.
+REQ-09 : Les elements mobiles dangereux doivent etre proteges par des
+dispositifs adequats.
+REQ-10 : Un dispositif d'arret d'urgence conforme a EN 13850 doit etre
+present.
+REQ-11 : Pour les machines a risque eleve, un organisme notifie doit
+intervenir.
+=== FIN ===
