@@ -283,3 +283,106 @@ def has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
         if re.search(pattern, normalized):
             return True
     return False
+
+#  3d. Évaluation d'une exigence
+
+def evaluate_requirement(
+    requirement: Requirement, product: ProductData, top_n: int = 3
+) -> Decision:
+    """
+    Évalue une exigence contre la fiche produit.
+
+    Pipeline de décision :
+      1. Score toutes les preuves (lexical).
+      2. Sélectionne les top-n preuves proches du meilleur score (fenêtre fixe).
+      3. Fusionne les preuves et détecte les marqueurs positifs/négatifs/incertains.
+      4. Vérifie la présence des références normatives requises.
+      5. Retourne SATISFAIT, NON SATISFAIT ou AMBIGU avec justification.
+
+    AMBIGU est retourné dès qu'une information est présente mais insuffisante
+    pour conclure (incertitude, négation partielle, référence manquante, etc.).
+    """
+    requirement_tokens = extract_keywords(requirement)
+
+    #  1 : scorer toutes les preuves
+    scored = []
+    for evidence in product.evidences:
+        score = score_evidence(requirement_tokens, evidence)
+        if score > 0:
+            scored.append((score, evidence))
+    scored.sort(key=lambda item: item[0], reverse=True)
+
+    #  2 : sélectionner les preuves les plus pertinentes
+    matched: list[Evidence] = []
+    if scored:
+        best_score = scored[0][0]
+        # Fenêtre fixe : on garde les preuves dans un écart de 0.5 du meilleur
+        min_score = max(1.0, best_score - 0.5)
+        matched   = [ev for score, ev in scored if score >= min_score][:top_n]
+
+    #  3 : aucune preuve trouvée → NON SATISFAIT immédiat
+    if not matched:
+        return Decision(
+            requirement=requirement,
+            status=Status.NON_SATISFAIT,
+            reason="Aucune preuve claire n'a ete trouvee dans la fiche produit pour cette exigence.",
+            missing_info="Ajouter une ligne explicite dans la fiche produit couvrant cette obligation.",
+        )
+
+    # 4 : détecter les marqueurs dans les preuves fusionnées
+    merged_evidence   = " | ".join(item.raw_line for item in matched)
+    has_positive      = has_any_phrase(merged_evidence, POSITIVE_MARKERS)
+    has_hard_negative = has_any_phrase(merged_evidence, HARD_NEGATIVE_MARKERS)
+    has_soft_negative = has_any_phrase(merged_evidence, SOFT_NEGATIVE_MARKERS)
+    has_uncertain     = has_any_phrase(merged_evidence, UNCERTAIN_MARKERS)
+
+    # 5 : vérifier les références normatives
+    needed_refs  = extract_reference_numbers(requirement.description)
+    seen_refs    = extract_reference_numbers(merged_evidence)
+    missing_refs = sorted(needed_refs - seen_refs)
+
+    evidence_hint = f"Preuve principale: {matched[0].raw_line}"
+
+    # 6 : arbre de décision
+    # Cas 1 : signal positif clair, aucun signal négatif ou incertain → SATISFAIT
+    if (has_positive and not has_hard_negative
+            and not has_soft_negative and not has_uncertain
+            and not missing_refs):
+        return Decision(requirement, Status.SATISFAIT, f"Exigence couverte. {evidence_hint}")
+
+    # Cas 2 : négation explicite sans aucun positif → NON SATISFAIT
+    if has_hard_negative and not has_positive:
+        return Decision(
+            requirement,
+            Status.NON_SATISFAIT,
+            f"Les preuves pointent une non-conformite explicite. {evidence_hint}",
+        )
+
+    # Cas 3 : positif mais référence normative absente → AMBIGU
+    if has_positive and missing_refs:
+        missing = ", ".join(missing_refs)
+        return Decision(
+            requirement,
+            Status.AMBIGU,
+            f"Conformite probable mais reference normative manquante ({missing}). {evidence_hint}",
+            missing_info=f"Ajouter la reference explicite: {missing}.",
+        )
+
+    # Cas 4 : incertitude, partiel, ou contradiction → AMBIGU
+    if has_uncertain or has_soft_negative or (has_positive and has_hard_negative):
+        return Decision(
+            requirement,
+            Status.AMBIGU,
+            f"Information presente mais insuffisante ou partiellement contradictoire. {evidence_hint}",
+            missing_info="Fournir une preuve explicite, complete et datee de conformite.",
+        )
+
+    # Cas 5 : indices présents mais non concluants → AMBIGU par défaut
+    return Decision(
+        requirement,
+        Status.AMBIGU,
+        f"Des indices existent mais ne permettent pas de conclure. {evidence_hint}",
+        missing_info="Completer la fiche avec un statut clair (oui/non), preuve et reference associee.",
+    )
+
+
