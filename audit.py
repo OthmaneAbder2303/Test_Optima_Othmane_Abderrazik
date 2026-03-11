@@ -50,13 +50,11 @@ class Status(str, Enum):
     NON_SATISFAIT = "NON SATISFAIT"
     AMBIGU        = "AMBIGU"
 
-
 @dataclass(frozen=True)
 class Requirement:
     """Représente une exigence réglementaire extraite (Étape 1)."""
     req_id: str        # identifiant normalisé, ex. "REQ-01"
     description: str   # texte de l'exigence, espaces normalisés
-
 
 @dataclass(frozen=True)
 class Evidence:
@@ -65,7 +63,6 @@ class Evidence:
     value: str        # valeur brute, ex. "EN COURS, signature prevue avant livraison"
     raw_line: str     # ligne reconstituée pour l'affichage dans le rapport
     tokens: set[str]  # tokens du couple clé+valeur pour le scoring lexical
-
 
 @dataclass
 class ProductData:
@@ -86,22 +83,20 @@ def normalize_text(text: str) -> str:
     )
     return deaccented.lower()
 
-
 def normalize_key(key: str) -> str:
     """Convertit une clé brute en snake_case sans accents ni caractères spéciaux."""
     normalized = re.sub(r"[^a-z0-9]+", "_", normalize_text(key))
     return normalized.strip("_")
 
-
 def tokenize(text: str) -> set[str]:
     """Extrait les tokens alphanumériques de longueur ≥ 2."""
     return set(re.findall(r"[a-z0-9]{2,}", normalize_text(text)))
 
-
 def normalize_req_id(raw_req_id: str) -> str:
-    """Normalise un identifiant REQ en majuscules avec tirets, ex. 'REQ-01'."""
-    cleaned = normalize_text(raw_req_id).replace(" ", "").replace("_", "-")
-    return cleaned.upper()
+    """Normalise un identifiant REQ en format 'REQ-XX'."""
+    # Extrait uniquement les chiffres, puis reconstruit l'ID
+    num = re.sub(r"\D", "", raw_req_id)
+    return f"REQ-{num.zfill(2)}"
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -123,28 +118,34 @@ def parse_requirements(text: str) -> list[Requirement]:
         une exigence numérotée automatiquement REQ-01, REQ-02, etc.
         Utile pour des textes réglementaires sans format structuré.
     """
+    # Nettoyage global des balises parasites avant tout traitement
+    clean_text = re.sub(r"===.*?===", "", text, flags=re.DOTALL)
+    clean_text = re.sub(r"---.*?---", "", clean_text, flags=re.DOTALL)
+
     # Tentative de parsing par identifiant REQ
     req_pattern = re.compile(
         r"(REQ[-_ ]?[A-Z0-9][A-Z0-9-]*)\s*[:\-]\s*(.+?)"
         r"(?=(?:\n\s*REQ[-_ ]?[A-Z0-9][A-Z0-9-]*\s*[:\-])|\Z)",
         re.DOTALL | re.IGNORECASE,
     )
+    
     parsed = [
         Requirement(
             req_id=normalize_req_id(req_id),
-            description=" ".join(description.split()),
+            description=" ".join(description.split()).strip(),
         )
-        for req_id, description in req_pattern.findall(text)
+        for req_id, description in req_pattern.findall(clean_text)
     ]
+    
     if parsed:
         return parsed
 
     # Fallback : numérotation automatique ligne par ligne
     fallback: list[Requirement] = []
-    for raw_line in text.splitlines():
+    for raw_line in clean_text.splitlines():
         line = raw_line.strip()
-        # Ignorer les séparateurs et lignes vides
-        if not line or line.startswith("---") or line.startswith("==="):
+        # Ignorer les lignes vides
+        if not line:
             continue
         # Supprimer les puces et numéros de liste éventuels
         cleaned = re.sub(r"^[-*]\s+", "", line)
@@ -154,12 +155,11 @@ def parse_requirements(text: str) -> list[Requirement]:
         req_id = f"REQ-{len(fallback) + 1:02d}"
         fallback.append(Requirement(req_id=req_id, description=cleaned))
 
-    if not fallback:
+    if not parsed and not fallback:
         raise ValueError(
             "Aucune exigence exploitable n'a ete detectee dans le texte reglementaire."
         )
     return fallback
-
 
 # ═════════════════════════════════════════════════════════════════════════════
 # ÉTAPE 2 — Analyser la fiche produit
