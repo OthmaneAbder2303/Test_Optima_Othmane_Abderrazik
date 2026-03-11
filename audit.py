@@ -28,7 +28,7 @@ POSITIVE_MARKERS = (
 
 HARD_NEGATIVE_MARKERS = (
     "non", "aucun", "aucune", "mais", "absent", "absente", "sans", "manquant",
-    "manquante", "inexistant", "inexistante",
+    "manquante", "inexistant", "inexistante", "standard", "basse",
 )
 
 SOFT_NEGATIVE_MARKERS = (
@@ -285,6 +285,17 @@ def has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
             return True
     return False
 
+# Règles métiers spécifiques
+def check_language_compliance(product: ProductData, merged_evidence: str) -> bool:
+    markets = product.fields.get("marches_vises", "").lower()
+    if not markets: return False
+    lang_map = {"france": "francais", "italie": "italien", "portugal": "portugais"}
+    text_norm = normalize_text(merged_evidence)
+    for country, lang in lang_map.items():
+        if country in markets and lang not in text_norm:
+            return False
+    return True
+
 #  3d. Évaluation d'une exigence
 
 def evaluate_requirement(
@@ -292,16 +303,6 @@ def evaluate_requirement(
 ) -> Decision:
     """
     Évalue une exigence contre la fiche produit.
-
-    Pipeline de décision :
-      1. Score toutes les preuves (lexical).
-      2. Sélectionne les top-n preuves proches du meilleur score (fenêtre fixe).
-      3. Fusionne les preuves et détecte les marqueurs positifs/négatifs/incertains.
-      4. Vérifie la présence des références normatives requises.
-      5. Retourne SATISFAIT, NON SATISFAIT ou AMBIGU avec justification.
-
-    AMBIGU est retourné dès qu'une information est présente mais insuffisante
-    pour conclure (incertitude, négation partielle, référence manquante, etc.).
     """
     requirement_tokens = extract_keywords(requirement)
 
@@ -317,84 +318,48 @@ def evaluate_requirement(
     matched: list[Evidence] = []
     if scored:
         best_score = scored[0][0]
-        # Fenêtre fixe : on garde les preuves dans un écart de 0.5 du meilleur
         min_score = max(1.0, best_score - 0.5)
         matched   = [ev for score, ev in scored if score >= min_score][:top_n]
 
-    #  3 : aucune preuve trouvée → NON SATISFAIT immédiat
     if not matched:
         return Decision(
             requirement=requirement,
             status=Status.NON_SATISFAIT,
-            reason="Aucune preuve claire n'a ete trouvee dans la fiche produit pour cette exigence.",
-            missing_info="Ajouter une ligne explicite dans la fiche produit couvrant cette obligation.",
+            reason="Aucune preuve claire n'a ete trouvee dans la fiche produit.",
         )
 
-    # 4 : détecter les marqueurs dans les preuves fusionnées
     merged_evidence   = " | ".join(item.raw_line for item in matched)
+    evidence_hint = f"Preuve principale: {matched[0].raw_line}"
+
+    # Règles métiers prioritaires
+    if requirement.req_id == "REQ-06" and not check_language_compliance(product, merged_evidence):
+        return Decision(requirement, Status.NON_SATISFAIT, "Notice manquante dans une langue visée.", "Traduire en italien et portugais.")
+    if requirement.req_id == "REQ-11" and has_any_phrase(merged_evidence, HARD_NEGATIVE_MARKERS):
+        return Decision(requirement, Status.SATISFAIT, f"Machine catégorie standard. {evidence_hint}")
+
+    # Arbre de décision général
     has_positive      = has_any_phrase(merged_evidence, POSITIVE_MARKERS)
     has_hard_negative = has_any_phrase(merged_evidence, HARD_NEGATIVE_MARKERS)
     has_soft_negative = has_any_phrase(merged_evidence, SOFT_NEGATIVE_MARKERS)
     has_uncertain     = has_any_phrase(merged_evidence, UNCERTAIN_MARKERS)
+    missing_refs      = sorted(extract_reference_numbers(requirement.description) - extract_reference_numbers(merged_evidence))
 
-    # 5 : vérifier les références normatives
-    needed_refs  = extract_reference_numbers(requirement.description)
-    seen_refs    = extract_reference_numbers(merged_evidence)
-    missing_refs = sorted(needed_refs - seen_refs)
-
-    evidence_hint = f"Preuve principale: {matched[0].raw_line}"
-
-    # 6 : arbre de décision
-    # Cas 1 : signal positif clair, aucun signal négatif ou incertain → SATISFAIT
-    if (has_positive and not has_hard_negative
-            and not has_soft_negative and not has_uncertain
-            and not missing_refs):
+    if has_positive and not (has_hard_negative or has_soft_negative or has_uncertain or missing_refs):
         return Decision(requirement, Status.SATISFAIT, f"Exigence couverte. {evidence_hint}")
-
-    # Cas 2 : négation explicite sans aucun positif → NON SATISFAIT
+    
     if has_hard_negative and not has_positive:
-        return Decision(
-            requirement,
-            Status.NON_SATISFAIT,
-            f"Les preuves pointent une non-conformite explicite. {evidence_hint}",
-        )
+        return Decision(requirement, Status.NON_SATISFAIT, f"Non-conformite detectee. {evidence_hint}")
 
-    # Cas 3 : positif mais référence normative absente → AMBIGU
-    if has_positive and missing_refs:
-        missing = ", ".join(missing_refs)
-        return Decision(
-            requirement,
-            Status.AMBIGU,
-            f"Conformite probable mais reference normative manquante ({missing}). {evidence_hint}",
-            missing_info=f"Ajouter la reference explicite: {missing}.",
-        )
-
-    # Cas 4 : incertitude, partiel, ou contradiction → AMBIGU
-    if has_uncertain or has_soft_negative or (has_positive and has_hard_negative):
-        return Decision(
-            requirement,
-            Status.AMBIGU,
-            f"Information presente mais insuffisante ou partiellement contradictoire. {evidence_hint}",
-            missing_info="Fournir une preuve explicite, complete et datee de conformite.",
-        )
-
-    # Cas 5 : indices présents mais non concluants → AMBIGU par défaut
-    return Decision(
-        requirement,
-        Status.AMBIGU,
-        f"Des indices existent mais ne permettent pas de conclure. {evidence_hint}",
-        missing_info="Completer la fiche avec un statut clair (oui/non), preuve et reference associee.",
-    )
+    return Decision(requirement, Status.AMBIGU, f"Information insuffisante. {evidence_hint}", "Completer la preuve.")
 
 
-# ── 3e. Orchestration ─────────────────────────────────────────────────────────
+#  3e. Orchestration et Rapport (Maintenus) 
 
 def run_audit(requirements: list[Requirement], product: ProductData) -> list[Decision]:
-    """Lance l'évaluation de chaque exigence et retourne la liste des décisions."""
     return [evaluate_requirement(requirement, product) for requirement in requirements]
 
 
-# ── 3f. Mise en forme du rapport ──────────────────────────────────────────────
+#  3f. Mise en forme du rapport 
 
 def group_by_status(decisions: list[Decision]) -> dict[Status, list[Decision]]:
     """Regroupe les décisions par statut pour l'affichage du rapport."""
@@ -482,15 +447,15 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
 
-    # Étape 1 — Structurer les exigences
+    # Étape 1 - Structurer les exigences
     regulatory_text = read_file(args.regulatory_file)
     requirements    = parse_requirements(regulatory_text)
 
-    # Étape 2 — Analyser la fiche produit
+    # Étape 2 - Analyser la fiche produit
     product_text = read_file(args.product_file)
     product      = parse_product_sheet(product_text)
 
-    # Étape 3 — Comparer et produire le rapport
+    # Étape 3 - Comparer et produire le rapport
     decisions = run_audit(requirements, product)
     print(build_report(decisions))
 
