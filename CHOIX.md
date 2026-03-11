@@ -39,7 +39,7 @@ J'ai choisi une approche **sans librairie NLP externe**, basée sur du matching 
 2. **Contrôle total de la logique AMBIGU** : l'enjeu central de l'exercice est de distinguer AMBIGU de NON SATISFAIT. Cette distinction repose sur des
 nuances sémantiques précises ("en cours", "partiel", "uniquement") que l'on maîtrise mieux avec des marqueurs explicites qu'avec un score flottant.
 
-3. **Lisibilité et débogage** : chaque décision est traçable — on peut retrouver exactement quel marqueur ou quelle preuve a produit le verdict.
+3. **Lisibilité et débogage** : chaque décision est traçable - on peut retrouver exactement quel marqueur ou quelle preuve a produit le verdict.
 
 ---
 
@@ -47,25 +47,25 @@ nuances sémantiques précises ("en cours", "partiel", "uniquement") que l'on ma
 
 Le pipeline est découpé en trois étapes strictement séparées :
 
-**Étape 1 — Parsing réglementaire** (`parse_requirements`)  
+**Étape 1 - Parsing réglementaire** (`parse_requirements`)  
 Extraction des REQ via regex lookahead entre deux identifiants consécutifs.
 Un fallback ligne-par-ligne gère les textes sans identifiants REQ explicites.
 
-**Étape 2 — Parsing fiche produit** (`parse_product_sheet`)  
+**Étape 2 - Parsing fiche produit** (`parse_product_sheet`)  
 Chaque ligne `Clé : Valeur` produit un objet `Evidence` avec :
 - une clé normalisée en snake_case (suppression des accents, caractères spéciaux)
 - un ensemble de tokens pour le scoring lexical
 
 Les clés dupliquées sont concaténées avec ` | ` pour ne rien perdre.
 
-**Étape 3 — Évaluation et rapport** (`evaluate_requirement`)  
+**Étape 3 - Évaluation et rapport** (`evaluate_requirement`)  
 Pour chaque exigence :
 1. Extraction des mots-clés significatifs (hors stopwords, longueur > 2)
 2. Scoring lexical de chaque Evidence : `(2 × overlap_clé) + overlap_valeur + 0.5 × partial_bonus`
 
    **`overlap_clé` (pondéré ×2)** : nombre de tokens de l'exigence présents
    dans la clé normalisée de l'Evidence (ex. `declaration_ce`). La clé est
-   pondérée ×2 car elle identifie le champ sémantique — si la clé matche,
+   pondérée ×2 car elle identifie le champ sémantique - si la clé matche,
    on est très probablement sur la bonne ligne de la fiche.
 
    **`overlap_valeur`** : nombre de tokens de l'exigence présents dans la
@@ -129,18 +129,15 @@ La fiche indique `Catégorie de risque : standard (pas de catégorie spéciale)`
 
 La normalisation en snake_case et le tokenizing sur les deux champs (clé + valeur) permettent de rapprocher ces formulations, mais un matching sémantique (embeddings) serait plus robuste pour des cas très divergents.
 
-**Limites du scoring lexical** : si les tokens de l'exigence sont absents de la fiche (ex. vocabulaire complètement différent), le score est nul et le verdict tombe en NON SATISFAIT par défaut, alors que l'information pourrait être présente sous une autre formulation. C'est le principal angle mort de l'approche.
+**Limites du scoring lexical** : si les tokens de l'exigence sont absents de la fiche (ex. vocabulaire complètement différent), le score est nul et le verdict tombe en NON SATISFAIT par défaut, alors que l'information pourrait être présente sous une autre formulation.
 
 ---
 
 ## Améliorations non implémentées (par manque de temps)
 
-- **Embeddings sémantiques** (sentence-transformers) pour gérer les
-  paraphrases et synonymes sans liste explicite de marqueurs
-- **Extraction des dates** dans les champs "en cours" pour évaluer si la
-  livraison prévue est réaliste
-- **Scoring de confiance** numérique en complément du verdict ternaire,
-  pour ordonner les AMBIGU par niveau de risque
+- **Embeddings sémantiques** (sentence-transformers) pour gérer les paraphrases et synonymes sans liste explicite de marqueurs
+- **Extraction des dates** dans les champs "en cours" pour évaluer si la livraison prévue est réaliste
+- **Scoring de confiance** numérique en complément du verdict ternaire, pour ordonner les AMBIGU par niveau de risque
 
 ---
 
