@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from enum import Enum
 import re
 import unicodedata
+import argparse
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -26,7 +27,7 @@ POSITIVE_MARKERS = (
 )
 
 HARD_NEGATIVE_MARKERS = (
-    "non", "aucun", "aucune", "absent", "absente", "sans", "manquant",
+    "non", "aucun", "aucune", "mais", "absent", "absente", "sans", "manquant",
     "manquante", "inexistant", "inexistante",
 )
 
@@ -386,3 +387,113 @@ def evaluate_requirement(
     )
 
 
+# ── 3e. Orchestration ─────────────────────────────────────────────────────────
+
+def run_audit(requirements: list[Requirement], product: ProductData) -> list[Decision]:
+    """Lance l'évaluation de chaque exigence et retourne la liste des décisions."""
+    return [evaluate_requirement(requirement, product) for requirement in requirements]
+
+
+# ── 3f. Mise en forme du rapport ──────────────────────────────────────────────
+
+def group_by_status(decisions: list[Decision]) -> dict[Status, list[Decision]]:
+    """Regroupe les décisions par statut pour l'affichage du rapport."""
+    groups: dict[Status, list[Decision]] = {
+        Status.SATISFAIT:     [],
+        Status.NON_SATISFAIT: [],
+        Status.AMBIGU:        [],
+    }
+    for decision in decisions:
+        groups[decision.status].append(decision)
+    return groups
+
+
+def format_group(
+    title: str, decisions: list[Decision], include_missing_info: bool = False
+) -> list[str]:
+    """Formate une section du rapport pour un statut donné."""
+    lines = [title]
+    if not decisions:
+        lines.append("- Aucun")
+        return lines
+    for decision in decisions:
+        lines.append(
+            f"- [{decision.requirement.req_id}] "
+            f"{decision.requirement.description} -> {decision.reason}"
+        )
+        if include_missing_info and decision.missing_info:
+            lines.append(f"  Manque pour conclure: {decision.missing_info}")
+    return lines
+
+
+def build_report(decisions: list[Decision]) -> str:
+    """
+    Construit le rapport final.
+    Ordre d'affichage : NON SATISFAIT → AMBIGU (avec actions correctives) → SATISFAIT.
+    """
+    groups = group_by_status(decisions)
+    total  = len(decisions)
+    lines  = [
+        "RAPPORT D'AUDIT",
+        f"Satisfait      : {len(groups[Status.SATISFAIT])} / {total}",
+        f"Non satisfait  : {len(groups[Status.NON_SATISFAIT])} / {total}",
+        f"Ambigu         : {len(groups[Status.AMBIGU])} / {total}",
+        "",
+    ]
+    lines.extend(format_group("NON SATISFAIT :", groups[Status.NON_SATISFAIT]))
+    lines.append("")
+    lines.extend(
+        format_group(
+            "AMBIGU (information presente mais insuffisante) :",
+            groups[Status.AMBIGU],
+            include_missing_info=True,
+        )
+    )
+    lines.append("")
+    lines.extend(format_group("SATISFAIT :", groups[Status.SATISFAIT]))
+    return "\n".join(lines)
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# Entrée — lecture des fichiers et lancement de l'audit
+# ─────────────────────────────────────────────────────────────────────────────
+
+def read_file(path: str) -> str:
+    """Lit un fichier texte encodé en UTF-8."""
+    with open(path, "r", encoding="utf-8") as handle:
+        return handle.read()
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Audit de conformite generique (reglementation vs fiche produit)."
+    )
+    parser.add_argument(
+        "--req", dest="regulatory_file", required=True,
+        help="Chemin vers le texte des exigences (ex. data/texte_reglementaire.txt).",
+    )
+    parser.add_argument(
+        "--prod", dest="product_file", required=True,
+        help="Chemin vers la fiche produit (ex. data/fiche_produit.txt).",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+
+    # Étape 1 — Structurer les exigences
+    regulatory_text = read_file(args.regulatory_file)
+    requirements    = parse_requirements(regulatory_text)
+
+    # Étape 2 — Analyser la fiche produit
+    product_text = read_file(args.product_file)
+    product      = parse_product_sheet(product_text)
+
+    # Étape 3 — Comparer et produire le rapport
+    decisions = run_audit(requirements, product)
+    print(build_report(decisions))
+
+
+if __name__ == "__main__":
+    main()
