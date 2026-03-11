@@ -77,7 +77,7 @@ class Decision:
     status: Status
     reason: str
     missing_info: str | None = None  # action corrective suggérée si AMBIGU/NON SATISFAIT
-    
+
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,3 +221,65 @@ def parse_product_sheet(text: str) -> ProductData:
         )
 
     return ProductData(fields=fields, evidences=evidences)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# ÉTAPE 3 — Comparer et produire le rapport
+# Pour chaque exigence : scoring des preuves, détection de marqueurs,
+# verdict SATISFAIT / NON SATISFAIT / AMBIGU.
+# ═════════════════════════════════════════════════════════════════════════════
+
+#  3a. Extraction de mots-clés
+
+def extract_keywords(requirement: Requirement) -> set[str]:
+    """
+    Extrait les tokens significatifs de l'exigence.
+    Filtre les stopwords et les tokens trop courts (≤ 2 caractères).
+    Si tous les tokens sont filtrés, conserve l'ensemble complet (sécurité).
+    """
+    tokens   = tokenize(requirement.description)
+    filtered = {token for token in tokens if token not in STOPWORDS and len(token) > 2}
+    return filtered or tokens
+
+def extract_reference_numbers(text: str) -> set[str]:
+    """
+    Extrait les références normatives numériques (3 à 6 chiffres).
+    Ex. "EN 13850" → {"13850"}.
+    Utilisé pour détecter les cas où une norme est exigée mais non citée.
+    """
+    return set(re.findall(r"\b\d{3,6}\b", normalize_text(text)))
+
+
+#  3b. Scoring lexical
+
+def score_evidence(requirement_tokens: set[str], evidence: Evidence) -> float:
+    """
+    Score lexical d'une preuve vis-à-vis d'une exigence.
+
+    Formule : (2 × overlap_clé) + overlap_valeur
+      - La clé est pondérée ×2 car elle identifie le champ sémantique.
+      - overlap_valeur capte les termes partagés dans le contenu de la preuve.
+
+    Ce score brut sert à classer les preuves par pertinence avant la décision.
+    """
+    key_tokens    = set(evidence.key.split("_"))
+    overlap_key   = len(requirement_tokens & key_tokens)
+    overlap_value = len(requirement_tokens & evidence.tokens)
+    return (2.0 * overlap_key) + overlap_value
+
+
+#  3c. Détection de marqueurs
+
+def has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
+    """
+    Détecte la présence d'un marqueur dans le texte normalisé.
+    Utilise \b pour les frontières de mots et \s+ pour tolérer les variantes
+    d'espacement dans les marqueurs multi-mots (ex. "en cours").
+    """
+    normalized = normalize_text(text)
+    for phrase in phrases:
+        escaped = re.escape(phrase)
+        pattern = r"\b" + escaped.replace(r"\ ", r"\s+") + r"\b"
+        if re.search(pattern, normalized):
+            return True
+    return False
