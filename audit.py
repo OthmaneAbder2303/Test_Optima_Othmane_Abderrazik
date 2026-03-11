@@ -70,6 +70,15 @@ class ProductData:
     fields: dict[str, str]     # accès rapide par clé normalisée
     evidences: list[Evidence]  # liste ordonnée pour le scoring
 
+@dataclass(frozen=True)
+class Decision:
+    """Résultat de l'évaluation d'une exigence (Étape 3)."""
+    requirement: Requirement
+    status: Status
+    reason: str
+    missing_info: str | None = None  # action corrective suggérée si AMBIGU/NON SATISFAIT
+    
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Utilitaires de normalisation (partagés par les 3 étapes)
