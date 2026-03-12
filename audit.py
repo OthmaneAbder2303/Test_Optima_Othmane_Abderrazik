@@ -24,6 +24,7 @@ POSITIVE_MARKERS = (
     "oui", "present", "presente", "complet", "complete", "conforme",
     "certifie", "certifiee", "valide", "validee", "signe", "signee",
     "appose", "apposee", "realise", "realisee", "effectue", "effectuee",
+    "verrouille", "verrouilee", "enceinte",
 )
 
 HARD_NEGATIVE_MARKERS = (
@@ -192,11 +193,17 @@ def parse_product_sheet(text: str) -> ProductData:
     """
     fields: dict[str, str] = {}
     evidences: list[Evidence] = []
+    current_section = ""
 
     for idx, raw_line in enumerate(text.splitlines(), start=1):
         line = raw_line.strip()
-        # Ignorer les séparateurs de sections et lignes vides
-        if not line or line.startswith("---") or line.startswith("==="):
+        # Ignorer les séparateurs de sections === et lignes vides
+        if not line or line.startswith("==="):
+            continue
+
+        # Détecter les titres de section et les mémoriser
+        if line.startswith("---"):
+            current_section = normalize_key(line.strip("-").strip())
             continue
 
         if ":" in line:
@@ -208,14 +215,14 @@ def parse_product_sheet(text: str) -> ProductData:
             existing    = fields.get(key)
             fields[key] = f"{existing} | {value}" if existing else value
             raw          = f"{raw_key.strip()}: {value}"
-            token_source = f"{raw_key} {value}"
+            token_source = f"{current_section} {raw_key} {value}"
         else:
             # Ligne libre (ex. note sans clé explicite)
             key          = f"ligne_{idx}"
             value        = line
             fields[key]  = value
             raw          = line
-            token_source = line
+            token_source = f"{current_section} {line}"
 
         evidences.append(
             Evidence(key=key, value=value, raw_line=raw, tokens=tokenize(token_source))
@@ -266,16 +273,19 @@ def score_evidence(requirement_tokens: set[str], evidence: Evidence) -> float:
     key_tokens    = set(evidence.key.split("_"))
     overlap_key   = len(requirement_tokens & key_tokens)
     overlap_value = len(requirement_tokens & evidence.tokens)
-    return (2.0 * overlap_key) + overlap_value
-
+    partial_bonus = sum(
+        0.5 for req_tok in requirement_tokens
+        for ev_tok in evidence.tokens | key_tokens
+        if req_tok in ev_tok or ev_tok in req_tok
+    )
+    
+    return (2.0 * overlap_key) + overlap_value + partial_bonus
 
 #  3c. Détection de marqueurs
 
 def has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
     """
     Détecte la présence d'un marqueur dans le texte normalisé.
-    Utilise \b pour les frontières de mots et \s+ pour tolérer les variantes
-    d'espacement dans les marqueurs multi-mots (ex. "en cours").
     """
     normalized = normalize_text(text)
     for phrase in phrases:
@@ -285,72 +295,104 @@ def has_any_phrase(text: str, phrases: tuple[str, ...]) -> bool:
             return True
     return False
 
+
 # Règles métiers spécifiques
+def get_target_markets(product: ProductData) -> str:
+    """Extrait les pays présents dans toute la fiche produit, indépendamment de la clé."""
+    full_content = " ".join(product.fields.values()).lower()
+    known_countries = {"france", "italie", "portugal", "espagne", "allemagne", "belgique"}
+    return " ".join([c for c in known_countries if c in full_content])
+
 def check_language_compliance(product: ProductData, merged_evidence: str) -> bool:
-    markets = product.fields.get("marches_vises", "").lower()
-    if not markets: return False
-    lang_map = {"france": "francais", "italie": "italien", "portugal": "portugais"}
+    """Vérifie si la langue requise est présente et non infirmée."""
+    markets_raw = get_target_markets(product)
+    if not markets_raw: return True 
+
+    reference_lang = {
+        "france": "francais", "italie": "italien", "portugal": "portugais",
+        "espagne": "espagnol", "allemagne": "allemand", "belgique": "francais"
+    }
+    
     text_norm = normalize_text(merged_evidence)
-    for country, lang in lang_map.items():
-        if country in markets and lang not in text_norm:
-            return False
+    
+    for country, lang in reference_lang.items():
+        if country in markets_raw:
+            # On cherche la langue. 
+            # On vérifie qu'elle n'est pas suivie de "non", "absent", etc.
+            # On crée un pattern pour détecter la langue et les mots négatifs proches
+            if lang not in text_norm:
+                return False
+            
+            # Vérifier si la langue est invalidée dans la même zone
+            # On cherche des marqueurs négatifs juste après la langue
+            negative_indicators = ["non", "pas", "absent", "manquant"]
+            for neg in negative_indicators:
+                if f"{lang} {neg}" in text_norm or f"{neg} {lang}" in text_norm:
+                    return False
+                    
     return True
 
 #  3d. Évaluation d'une exigence
-
 def evaluate_requirement(
     requirement: Requirement, product: ProductData, top_n: int = 3
 ) -> Decision:
-    """
-    Évalue une exigence contre la fiche produit.
-    """
+    """Évalue une exigence contre la fiche produit avec règles métiers."""
     requirement_tokens = extract_keywords(requirement)
 
-    #  1 : scorer toutes les preuves
-    scored = []
-    for evidence in product.evidences:
-        score = score_evidence(requirement_tokens, evidence)
-        if score > 0:
-            scored.append((score, evidence))
-    scored.sort(key=lambda item: item[0], reverse=True)
+    scored = sorted([(score_evidence(requirement_tokens, ev), ev) 
+                     for ev in product.evidences if score_evidence(requirement_tokens, ev) > 0], 
+                    key=lambda item: item[0], reverse=True)
 
-    #  2 : sélectionner les preuves les plus pertinentes
-    matched: list[Evidence] = []
-    if scored:
-        best_score = scored[0][0]
-        min_score = max(1.0, best_score - 0.5)
-        matched   = [ev for score, ev in scored if score >= min_score][:top_n]
+    matched = [ev for score, ev in scored if score >= max(1.0, scored[0][0] - 0.5)][:top_n] if scored else []
 
     if not matched:
-        return Decision(
-            requirement=requirement,
-            status=Status.NON_SATISFAIT,
-            reason="Aucune preuve claire n'a ete trouvee dans la fiche produit.",
-        )
+        return Decision(requirement, Status.NON_SATISFAIT, "Aucune preuve claire trouvée.")
 
-    merged_evidence   = " | ".join(item.raw_line for item in matched)
+    #merged_evidence = " | ".join(item.raw_line for item in matched)
+    merged_evidence = " | ".join(product.fields.values())
     evidence_hint = f"Preuve principale: {matched[0].raw_line}"
-
-    # Règles métiers prioritaires
-    if requirement.req_id == "REQ-06" and not check_language_compliance(product, merged_evidence):
-        return Decision(requirement, Status.NON_SATISFAIT, "Notice manquante dans une langue visée.", "Traduire en italien et portugais.")
-    if requirement.req_id == "REQ-11" and has_any_phrase(merged_evidence, HARD_NEGATIVE_MARKERS):
-        return Decision(requirement, Status.SATISFAIT, f"Machine catégorie standard. {evidence_hint}")
-
-    # Arbre de décision général
-    has_positive      = has_any_phrase(merged_evidence, POSITIVE_MARKERS)
+    evidence_text = normalize_text(merged_evidence)
+    
+    # REQ-06 : Vérification linguistique dynamique
+    if requirement.req_id == "REQ-06":
+        if check_language_compliance(product, merged_evidence):
+            # AJOUT : Retour immédiat si conforme
+            return Decision(requirement, Status.SATISFAIT, f"Conformité linguistique vérifiée. {evidence_hint}")
+        else:
+            return Decision(requirement, Status.NON_SATISFAIT, "Notice manquante dans une langue d'un pays visé.", "Traduire la notice.")
+        
+    # REQ-11 : Gestion générique des niveaux de risque
+    if requirement.req_id == "REQ-11":
+        risk_levels = {"faible": 1, "standard": 1, "moyen": 2, "eleve": 3, "critique": 3}
+        found_level = next((lvl for lvl in risk_levels if lvl in evidence_text), None)
+        
+        if found_level:
+            if risk_levels[found_level] >= 3:
+                # On vérifie la présence de l'organisme tout en excluant le cas "sans"
+                has_organism = ("organisme" in evidence_text or "notifie" in evidence_text)
+                is_negative = any(m in evidence_text for m in ["sans", "absent", "manquant", "non conforme"])
+                
+                if has_organism and not is_negative:
+                    return Decision(requirement, Status.SATISFAIT, f"Risque {found_level} : organisme notifié identifié. {evidence_hint}")
+                else:
+                    return Decision(requirement, Status.NON_SATISFAIT, f"Risque {found_level} : organisme notifié manquant ou explicitement absent.")
+            
+            return Decision(requirement, Status.SATISFAIT, f"Risque {found_level} : intervention organisme non requise.")
+        
+    #  ARBRE DE DÉCISION GÉNÉRAL
+    has_positive = has_any_phrase(merged_evidence, POSITIVE_MARKERS)
     has_hard_negative = has_any_phrase(merged_evidence, HARD_NEGATIVE_MARKERS)
     has_soft_negative = has_any_phrase(merged_evidence, SOFT_NEGATIVE_MARKERS)
-    has_uncertain     = has_any_phrase(merged_evidence, UNCERTAIN_MARKERS)
-    missing_refs      = sorted(extract_reference_numbers(requirement.description) - extract_reference_numbers(merged_evidence))
+    has_uncertain = has_any_phrase(merged_evidence, UNCERTAIN_MARKERS)
+    missing_refs = sorted(extract_reference_numbers(requirement.description) - extract_reference_numbers(merged_evidence))
 
     if has_positive and not (has_hard_negative or has_soft_negative or has_uncertain or missing_refs):
         return Decision(requirement, Status.SATISFAIT, f"Exigence couverte. {evidence_hint}")
     
     if has_hard_negative and not has_positive:
-        return Decision(requirement, Status.NON_SATISFAIT, f"Non-conformite detectee. {evidence_hint}")
+        return Decision(requirement, Status.NON_SATISFAIT, f"Non-conformité explicite. {evidence_hint}")
 
-    return Decision(requirement, Status.AMBIGU, f"Information insuffisante. {evidence_hint}", "Completer la preuve.")
+    return Decision(requirement, Status.AMBIGU, f"Information insuffisante. {evidence_hint}", "Compléter la preuve ou référence.")
 
 
 #  3e. Orchestration et Rapport (Maintenus) 
