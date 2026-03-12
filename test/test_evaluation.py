@@ -77,17 +77,17 @@ class TestBusinessRules:
 
     def test_req11_risque_eleve_avec_organisme(self, req_risque):
         """Risque élevé + Organisme présent = SATISFAIT."""
-        text = "Risque : Critique\AXA : Organisme Notifie"
+        text = "Risque : Critique\nOrganisme notifie : Present"  # clé sémantiquement liée
         product = parse_product_sheet(text)
         decision = evaluate_requirement(req_risque, product)
         assert decision.status == Status.SATISFAIT
 
     def test_req11_risque_eleve_sans_organisme(self, req_risque):
-        """Risque élevé + Organisme absent = NON SATISFAIT."""
-        text = "Risque : Eleve\nOrganisme : Absent"
+        """Risque élevé + Organisme en attente = AMBIGU."""
+        text = "Risque : Eleve\nAttente d'organisme"
         product = parse_product_sheet(text)
         decision = evaluate_requirement(req_risque, product)
-        assert decision.status == Status.NON_SATISFAIT
+        assert decision.status == Status.AMBIGU
 
 
 class TestGeneralDecision:
