@@ -19,14 +19,15 @@ python audit.py --req data/texte_reglementaire.txt --prod data/fiche_produit.txt
 ```
 
 ## Structure du projet
-
+```
 data/
-  fiche_produit.txtg
-  texte_reglementaire.txt
+├── fiche_produit.txt
+└── texte_reglementaire.txt
 test/
-  test_evaluation.py
-  test_parsing.py
-audit.py       # pipeline principal
-CHOIX.md          # méthodologie et décisions techniques
+├── test_evaluation.py
+└── test_parsing.py
+audit.py
+CHOIX.md
 README.md
 requirements.txt
+```
