@@ -17,3 +17,16 @@ pip install -r requirements.txt
 ```bash
 python audit.py --req data/texte_reglementaire.txt --prod data/fiche_produit.txt
 ```
+
+## Structure du projet
+
+data/
+  fiche_produit.txtg
+  texte_reglementaire.txt
+test/
+  test_evaluation.py
+  test_parsing.py
+audit.py       # pipeline principal
+CHOIX.md          # méthodologie et décisions techniques
+README.md
+requirements.txt
