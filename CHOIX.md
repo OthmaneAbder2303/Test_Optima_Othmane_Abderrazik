@@ -13,7 +13,7 @@ Pour corriger ça, j'ai essayé d'écrire des règles explicites pour chaque REQ
 ### Étape 3 : pivot - partir du texte réglementaire (bonne direction)
 
 J'ai alors changé de perspective : **le texte réglementaire est la référence
-stable, pas la fiche produit**. La fiche m'avait juste appris que certains mots ne sont pas explicites — par exemple, "EN ISO 13850" dans la fiche correspond à "EN 13850" dans l'exigence, ou "enceinte de protection" correspond à "dispositifs adéquats".
+stable, pas la fiche produit**. La fiche m'avait juste appris que certains mots ne sont pas explicites - par exemple, "EN ISO 13850" dans la fiche correspond à "EN 13850" dans l'exigence, ou "enceinte de protection" correspond à "dispositifs adéquats".
 
 Cette observation m'a conduit à définir un **vocabulaire ancré sur le texte
 réglementaire** : extraire les tokens significatifs de chaque REQ, puis les
@@ -111,8 +111,8 @@ Pour chaque exigence :
 4. Règles métier spécifiques par REQ (prioritaires, voir section dédiée)
 5. Détection de marqueurs sur le texte fusionné :
    - **POSITIFS** : "present", "conforme", "certifié", "réalisée"...
-   - **NÉGATIFS FORTS** : "non", "absent", "manquant", "standard", "basse"...
-   - **NÉGATIFS DOUX** : "partiel", "incomplet", "uniquement"...
+   - **NÉGATIFS FORTS** : "non", "absent", "manquant", "standard", "basse"....
+   - **NÉGATIFS DOUX** : "partiel", "incomplet", "uniquement"....
    - **INCERTAINS** : "en cours", "prévu", "à confirmer"...
 6. Arbre de décision : SATISFAIT -> NON SATISFAIT -> AMBIGU par défaut
 
@@ -135,7 +135,7 @@ Arbre à trois branches :
 - Aucune preuve → **NON SATISFAIT**
  
 Cette règle a été nécessaire car le scoring générique retournait SATISFAIT
-sur la seule présence d'"enceinte de protection" sans vérifier le périmètre
+sur la seule présence d'enceinte de protection sans vérifier le périmètre
 couvert.
  
 **REQ-11 - Organisme notifié**  
@@ -194,7 +194,9 @@ Ces trois cas illustrent une limite fondamentale de l'approche purement lexicale
 ## Améliorations non implémentées (par manque de temps)
 
 - **Extraction des dates** dans les champs "en cours" pour évaluer si la livraison prévue est réaliste
-
+- **Export `--output json`** pour intégration dans un pipeline externe
+- **Support multi-documents** : auditer plusieurs fiches produit en batch
+- **Base de connaissances domaine** (ontologie directive machines) pour raisonner sur la logique métier sans règles hardcodées par REQ
 
 ---
 
